@@ -24,16 +24,18 @@ const init = async () => {
   }
 }
 
-const waitForHealthy = async (callback) => {
-  const sql = `SELECT * FROM avapolos_sync`;
+const waitForHealthy = (retries) => new Promise((resolve, reject) => {
+  const sql = 'SELECT * FROM avapolos_sync';
+  const delay = 1000;
+  const retryCount = retries || 10;
 
   try {
     await db.query(sql);
-    callback()
+    resolve()
   } catch {
-    setTimeout(() => waitForHealthy(callback), 3000);
+    setTimeout(() => waitForHealthy(retryCount - 1), delay)
   }
-}
+})
 
 module.exports = {
   client: db,

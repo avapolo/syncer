@@ -19,7 +19,8 @@
     "helmet": "^4.5.0",
     "minio": "^7.0.18",
     "nanoid": "^3.1.22",
-    "pg": "^8.6.0"
+    "pg": "^8.6.0",
+    "winston": "^3.3.3"
   },
   "devDependencies": {
     "nodemon": "^2.0.7"

@@ -5,7 +5,8 @@ const { nanoid } = require('nanoid');
 const { client:db, waitForHealthy } = require('../db');
 const container = require('./container');
 const objstore = require('./objstore');
-const config = require('../config')
+const config = require('../config');
+const logger = require('../logger');
 
 const getNextExport = async() => {
   const lastExport = await getLastExport()
@@ -39,8 +40,6 @@ const copyDatabase = async (tmpPath) => {
   const source = await container.getVolumeMountpointByContainer(config.replication.main, "/var/lib/postgresql/data")
   const dest = `${tmpPath}/database`;
 
-  console.log(source)
-  console.log(dest)
   await fs.copy(source, dest, { recursive: true, overwrite: true })
 }
 
@@ -48,8 +47,6 @@ const copyMoodleDataFiledir = async (tmpPath) => {
   const source = `${(await container.getVolumeMountpointByContainer("moodle", "/app/moodledata"))}/filedir`
   const dest = `${tmpPath}/filedir`;
 
-  console.log(source)
-  console.log(dest)
   await fs.copy(source, dest, { recursive: true, overwrite: true })
 }
 
@@ -59,56 +56,51 @@ const createSyncPacket = async () => {
   const source = `${tmpPath}/`;
   const dest = `${__dirname}/${id}.tgz`;
 
-  console.log(id)
-  console.log(tmpPath)
-  console.log(dest)
-
   await copyDatabase(tmpPath)
   await copyMoodleDataFiledir(tmpPath)
 
   await compressing.tgz.compressDir(source, dest, { ignoreBase: true })
   await fs.rmdir(tmpPath, { recursive: true })
-  console.log('done!')
 
   return dest;
 }
 
 const run = async () => {
   try {
-    console.log("Running export")
-    console.log(`getting next export iteration`)
+    logger.debug("Running export")
+    logger.debug(`getting next export iteration`)
     const nextExport = await getNextExport();
-    console.log(`next iteration is #${nextExport}`)
-    console.log(`creating control record`);
+    logger.debug(`next iteration is #${nextExport}`)
+    logger.debug(`creating control record`);
     await createControlRecord(nextExport);
-    console.log(`stopping main database`)
+    logger.debug(`stopping main database`)
     await container.stop(config.replication.main);
-    console.log(`creating sync packet`)
+    logger.debug(`creating sync packet`)
     const packetPath = await createSyncPacket()
-    console.log(`uploading to object storage`);;
+    logger.debug(`uploading to object storage`);
     const ret = await objstore.put(config.minio.exportsBucket, resolveExportName(config.instance, nextExport), packetPath)
-    console.log(ret)
-    console.log("Removing local copy of sync packet")
+    logger.debug(ret)
+    logger.debug("Removing local copy of sync packet")
     await fs.unlink(packetPath)
     
-    console.log("cleaning queue")
+    logger.debug("cleaning queue")
     await container.start(config.replication.main);
     await container.start(config.replication.sync);
 
-    console.log('waiting for BDR')
+    logger.debug('waiting for BDR')
 
     waitForHealthy(async () => {
       await db.query("SELECT bdr.wait_slot_confirm_lsn(NULL, NULL)");
-      console.log('stopping sync db')
+      logger.debug('stopping sync db')
       container.stop(config.replication.sync);
       return;
     })
     
   } catch(error) {
-    console.log('an error ocurred, starting main db and stopping sync')
+    logger.debug('an error ocurred, starting main db and stopping sync')
     await container.stop(config.replication.sync)
     await container.start(config.replication.main)
-    console.log('done')
+    logger.debug('done')
     throw error
   }
   
